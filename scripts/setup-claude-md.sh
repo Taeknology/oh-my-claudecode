@@ -78,9 +78,12 @@ resolve_active_plugin_root() {
       fi
       return 0
     fi
-    # json_root basename is not a release semver (e.g. dev, latest); prefer the latest cached release
-    # if complete; otherwise fall back to json_root (incomplete cache is worse than known json path).
-    if [ -f "${cache_base}/${sorted_latest}/docs/CLAUDE.md" ]; then
+    # json_root basename is not a release semver (e.g. dev, latest).
+    # Respect the user's explicit install path when complete; only fall back to the
+    # cached stable release when json_root itself is unusable (missing docs/CLAUDE.md).
+    if [ -f "${json_root}/docs/CLAUDE.md" ]; then
+      echo "$json_root"
+    elif [ -f "${cache_base}/${sorted_latest}/docs/CLAUDE.md" ]; then
       echo "${cache_base}/${sorted_latest}"
     else
       echo "$json_root"

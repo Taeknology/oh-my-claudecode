@@ -638,8 +638,8 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).toContain('# Active Version');
   });
 
-  it('falls back to latest cached release when installed_plugins.json installPath is non-semver (e.g. dev)', () => {
-    // json_root basename is "dev" — not a semver — so cache version should win
+  it('prefers complete non-semver json_root over cached release when installed_plugins.json installPath is non-semver (e.g. dev)', () => {
+    // json_root basename is "dev-install" — not a semver — but docs/CLAUDE.md is present, so json_root should win
     const root = mkdtempSync(join(tmpdir(), 'omc-non-semver-json-'));
     tempRoots.push(root);
 
@@ -695,10 +695,67 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
 
     expect(result.status).toBe(0);
     const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
-    // non-semver json_root → should fall back to latest cached release
+    // non-semver json_root is complete (docs/CLAUDE.md present) → should use json_root, not cache
+    expect(installed).toContain('<!-- OMC:VERSION:dev -->');
+    expect(installed).toContain('# Dev Version');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.11.0 -->');
+  });
+
+  it('falls back to cached release when non-semver json_root is incomplete (missing docs/CLAUDE.md)', () => {
+    // json_root basename is "dev-install" but lacks docs/CLAUDE.md → cache should win
+    const root = mkdtempSync(join(tmpdir(), 'omc-non-semver-incomplete-'));
+    tempRoots.push(root);
+
+    const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const scriptVersion = join(cacheBase, '4.10.0');
+    const devInstall = join(root, 'dev-install');
+    const latestCached = join(cacheBase, '4.11.0');
+    const projectRoot = join(root, 'project');
+    const homeRoot = join(root, 'home');
+
+    mkdirSync(join(scriptVersion, 'scripts'), { recursive: true });
+    mkdirSync(join(scriptVersion, 'docs'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(scriptVersion, 'scripts', 'setup-claude-md.sh'));
+    mkdirSync(join(scriptVersion, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(CONFIG_DIR_HELPER, join(scriptVersion, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(
+      join(scriptVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.10.0 -->\n\n# Script Version\n<!-- OMC:END -->\n`,
+    );
+
+    // dev install directory exists but docs/CLAUDE.md is absent (incomplete install)
+    mkdirSync(devInstall, { recursive: true });
+
+    // latest release in cache is complete
+    mkdirSync(join(latestCached, 'docs'), { recursive: true });
+    writeFileSync(
+      join(latestCached, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.11.0 -->\n\n# Latest Release\n<!-- OMC:END -->\n`,
+    );
+
+    mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
+    writeFileSync(
+      join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        'oh-my-claudecode@omc': [{ installPath: devInstall, version: 'dev' }],
+      }),
+    );
+
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(homeRoot, '.claude'), { recursive: true });
+    writeFileSync(join(homeRoot, '.claude', 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+
+    const result = spawnSync('bash', [join(scriptVersion, 'scripts', 'setup-claude-md.sh'), 'local'], {
+      cwd: projectRoot,
+      env: { ...process.env, HOME: homeRoot, CLAUDE_CONFIG_DIR: join(homeRoot, '.claude') },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
+    // non-semver json_root is incomplete → should fall back to latest cached release
     expect(installed).toContain('<!-- OMC:VERSION:4.11.0 -->');
     expect(installed).toContain('# Latest Release');
-    expect(installed).not.toContain('<!-- OMC:VERSION:dev -->');
   });
 
   it('prefers cache version over stale installed_plugins.json after /plugin update', () => {
